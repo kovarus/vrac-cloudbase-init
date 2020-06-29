@@ -1,0 +1,141 @@
+formatVersion: 1
+version: 6
+name: Win2019-cloudbase-multipart
+inputs:
+  machineSize:
+    type: string
+    default: generic.medium
+    description: The machine size (T-Shirt)
+    oneOf:
+      - title: Small
+        const: generic.small
+      - title: Medium
+        const: generic.medium
+      - title: Large
+        const: generic.large
+  dataDiskSize:
+    type: number
+    default: 20
+    description: Select the data disk size
+    enum:
+      - 20
+      - 40
+      - 80
+  hostname:
+    type: string
+    default: dag-test-xyx
+    description: Enter the desired hostname
+  ipaddr:
+    type: string
+    default: 10.10.10.10
+    description: Enter a valid host IP
+  subnetMask:
+    type: number
+    default: 24
+    description: Select the subnet mask
+    oneOf:
+      - title: 255.255.255.0
+        const: 24
+      - title: 255.255.255.128
+        const: 25
+      - title: 255.255.255.224
+        const: 26
+      - title: 255.255.255.240
+        const: 27
+      - title: 255.255.255.248
+        const: 28
+  gateway:
+    type: string
+    default: 10.10.10.1
+    description: Enter the host gateway
+  dnsServer:
+    type: string
+    default: 8.8.4.4
+    description: Enter the primary dns servers IP
+  dnsSuffix:
+    type: string
+    default: corp.local
+    description: Enter the primary DNS Suffix
+  newUser:
+    type: string
+    default: casadminuser
+    description: New user for local admin group
+  newUserPassword:
+    type: string
+    encrypted: true
+    default: Password1234@$
+    description: Password for new admin user
+resources:
+  Cloud_Machine_1:
+    type: Cloud.Machine
+    metadata:
+      layoutPosition:
+        - 0
+        - 2
+    networks:
+      - network: '${resource.Cloud_Network_1.id}'
+    properties:
+      name: '${input.hostname}'
+      image: Windows 2019 Cloudbase-init 1.1.1
+      flavor: '${input.machineSize}'
+      resourceGroupName: Dana
+      remoteAccess:
+        authentication: usernamePassword
+        username: Administrator
+        password: Password1234@$
+      cloudConfig: |
+        Content-Type: multipart/mixed; boundary="===123456789"
+        MIME-Version: 1.0   
+
+        --===123456789
+        Content-Type: text/cloud-config; charset="us-ascii"
+        MIME-Version: 1.0
+        Content-Transfer-Encoding: 7bit
+        Content-Disposition: attachment; filename="cloud-config"
+
+        set_timezone: US/Pacific
+        set_hostname: ${input.hostname}
+
+        --===123456789
+        Content-Type: text/x-shellscript; charset="us-ascii"
+        MIME-Version: 1.0
+        Content-Transfer-Encoding: 7bit
+        Content-Disposition: attachment; filename="doPsStuff.ps1"
+
+        #ps1_sysnative
+        New-NetIpAddress -InterfaceAlias Ethernet0 -IPAddress ${input.ipaddr} -PrefixLength ${input.subnetMask} -DefaultGateway ${input.gateway}
+        Set-DnsClientServerAddress -InterfaceAlias Ethernet0 -ServerAddresses("${input.dnsServer}")
+        Set-DnsClient -InterfaceAlias Ethernet0 -ConnectionSpecificSuffix "${input.dnsSuffix}"
+        Set-DnsClientGlobalSetting -SuffixSearchList @("${input.dnsSuffix}")
+        Get-Disk | Where-Object PartitionStyle -Eq "RAW" | Initialize-Disk -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume
+        Disable-NetAdapterBinding -InterfaceAlias "Ethernet0" -ComponentID ms_tcpip6
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+        Set-Service -Name TermService -StartType Automatic -Status Running
+        Set-Service -Name UmRdpService -Status Running
+        Set-Service -Name SessionEnv -Status Running
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+        $password = ConvertTo-SecureString ${input.newUserPassword} -AsPlainText -Force
+        $newUser = New-LocalUser -Name "${input.newUser}" -Password $password -FullName "CAS Added Admin User" -Description "CAS Added Admin User"
+        Add-LocalGroupMember -Group "Administrators" -Member "${input.newUser}"
+      networks:
+        - network: '${resource.Cloud_Network_1.id}'
+      attachedDisks:
+        - source: '${resource.Cloud_Volume_1.id}'
+  Cloud_Network_1:
+    type: Cloud.Network
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      networkType: existing
+      constraints:
+        - tag: 'network:dg-vsanready-vlan624'
+  Cloud_Volume_1:
+    type: Cloud.Volume
+    metadata:
+      layoutPosition:
+        - 2
+        - 1
+    properties:
+      capacityGb: '${input.dataDiskSize}'
